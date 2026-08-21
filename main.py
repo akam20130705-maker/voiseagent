@@ -4,7 +4,6 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 from duckduckgo_search import DDGS
 from openai import OpenAI
-import google.generativeai as genai
 from dotenv import load_dotenv
 
 # .env fayldan kalitlarni yuklash
@@ -17,33 +16,37 @@ logging.basicConfig(
 )
 
 # Kalitlarni o'qish
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+TELEGRAM_TOKEN = os.getenv("8951160061:AAGDox68ulAFgbHyMsKtLO7uFDENpCnoIUY")
+OPENAI_API_KEY = os.getenv("") # Bu Whisper uchun ishlatiladi
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") # Bu miya (LLM) uchun
 
-# API klientlarni sozlash
-openai_client = None
-gemini_model = None
-
+# 1. Ovozni tanish uchun OpenAI (Whisper) klienti
+whisper_client = None
 if OPENAI_API_KEY:
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    whisper_client = OpenAI(api_key=OPENAI_API_KEY)
 else:
-    logging.warning("OpenAI API key topilmadi. Ovozli xabarlar ishlamaydi.")
+    logging.warning("⚠️ OpenAI API key topilmadi. Ovozli xabarlar ishlamaydi.")
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-pro')
+# 2. Mantiq va Xulosa uchun OpenRouter klienti
+brain_client = None
+if OPENROUTER_API_KEY:
+    # OpenRouter OpenAI kutubxonasi bilan ishlaydi, faqat base_url o'zgaradi
+    brain_client = OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1"
+    )
+    logging.info("✅ OpenRouter muvaffaqiyatli ulandi.")
 else:
-    logging.warning("Gemini API key topilmadi. AI xulosa ishlamaydi.")
+    logging.error("❌ OpenRouter API key topilmadi! Bot mantiqiy qismi ishlamaydi.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Salom! Men sizning Aqlli Web Agentingizman. 🤖\n"
+        "Salom! Men sizning Aqlli Web Agentingizman (OpenRouter + Llama-3). 🤖\n"
         "Menga matn yoki ovozli xabar yuboring, men internetdan qidirib, javob beraman."
     )
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not openai_client:
+    if not whisper_client:
         await update.message.reply_text("❌ Xato: OpenAI API kaliti sozlanmagan. Ovozni taniy olmayman.")
         return
 
@@ -53,7 +56,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         with open(file_path, "rb") as audio_file:
-            transcription = openai_client.audio.transcriptions.create(
+            transcription = whisper_client.audio.transcriptions.create(
                 model="whisper-1", 
                 file=audio_file
             )
@@ -76,7 +79,6 @@ async def search_web(query):
     try:
         results = []
         with DDGS() as ddgs:
-            # MaxResults 5 ta
             for r in ddgs.text(query, max_results=5):
                 results.append(f"• {r['title']}\n  {r['body']}")
         return "\n\n".join(results) if results else "Hech qanday natija topilmadi."
@@ -84,45 +86,58 @@ async def search_web(query):
         return f"Qidiruvda xatolik: {str(e)}"
 
 async def generate_summary(query, search_results):
-    """AI yordamida qisqa xulosa"""
+    """OpenRouter (Llama-3) yordamida qisqa xulosa"""
+    
+    if not brain_client:
+        return "⚠️ OpenRouter API kaliti yo'q. Xulosa qilish mumkin emas.\n\nRaw ma'lumotlar:\n" + search_results
+
     prompt = f"""
+    Sen foydali yordamchisan. Javoblarni faqat O'ZBEK tilida ber.
+    
     Foydalanuvchi savoli: {query}
     
     Internetdan olingan ma'lumotlar:
     {search_results}
     
-    Vazifa: Ushbu ma'lumotlarga asoslanib, foydalanuvchiga O'ZBEK tilida qisqa, aniq va tushunarli javob yoz. 
-    Faqat faktlarni bayon qil, ortiqcha so'zlarni ishlatma.
+    Vazifa: Ushbu ma'lumotlarga asoslanib, foydalanuvchiga qisqa, aniq va tushunarli javob yoz. 
+    Manbalarni sanab o'tma, shunchaki faktlarni jamlab ber.
     """
     
-    if gemini_model:
-        try:
-            response = gemini_model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            return f"AI xulosada xatolik: {str(e)}"
-    else:
-        return "⚠️ Gemini API kaliti yo'q. Xulosa qilish mumkin emas.\n\nRaw ma'lumotlar:\n" + search_results
+    try:
+        response = brain_client.chat.completions.create(
+            model="meta-llama/llama-3-70b-instruct", # Eng zo'r ochiq model
+            messages=[
+                {"role": "system", "content": "Sen o'zbek tilida gapiruvchi aqlli yordamchisan."},
+                {"role": "user", "content": prompt}
+            ],
+            # OpenRouter uchun maxsus header (ixtiyoriy, lekin foydali)
+            extra_headers={
+                "HTTP-Referer": "https://github.com/sizning_username/voice-agent-bot", 
+                "X-Title": "Voice Web Agent",
+            }
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"AI xulosada xatolik: {str(e)}"
 
 async def process_query(update: Update, context: ContextTypes.DEFAULT_TYPE, query: str):
     status_msg = await update.message.reply_text("🔍 Internetdan qidiryapman...")
     
     try:
         search_results = await search_web(query)
-        await status_msg.edit_text("🧠 Ma'lumotlarni tahlil qilyapman...")
+        await status_msg.edit_text("🧠 Ma'lumotlarni tahlil qilyapman (Llama-3)...")
         final_answer = await generate_summary(query, search_results)
         
-        # Agar javob juda uzun bo'lsa, Telegram chekloviga moslash
         if len(final_answer) > 4000:
             final_answer = final_answer[:4000] + "... (davomi bor)"
             
         await status_msg.edit_text(final_answer)
     except Exception as e:
-        await status_msg.edit_text(f"❌ Jarayonda xatolik yuz berdi: {str(e)}")
+        await status_msg.edit_text(f"❌ Jarayonda xatolik: {str(e)}")
 
 if __name__ == '__main__':
     if not TELEGRAM_TOKEN:
-        print("❌ XATO: TELEGRAM_TOKEN topilmadi! Iltimos, Secrets (.env) ni tekshiring.")
+        print("❌ XATO: TELEGRAM_TOKEN topilmadi!")
         exit(1)
 
     print("✅ Bot ishga tushmoqda...")
