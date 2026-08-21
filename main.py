@@ -32,7 +32,7 @@ brain_client = None
 if OPENROUTER_API_KEY:
     # OpenRouter OpenAI kutubxonasi bilan ishlaydi, faqat base_url o'zgaradi
     brain_client = OpenAI(
-        api_key=,
+        api_key=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,
         base_url="https://openrouter.ai/api/v1"
     )
     logging.info("✅ OpenRouter muvaffaqiyatli ulandi.")
