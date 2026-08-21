@@ -17,8 +17,8 @@ logging.basicConfig(
 
 # Kalitlarni o'qish
 TELEGRAM_TOKEN = os.getenv("8951160061:AAGDox68ulAFgbHyMsKtLO7uFDENpCnoIUY")
-OPENAI_API_KEY = os.getenv("") # Bu Whisper uchun ishlatiladi
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") # Bu miya (LLM) uchun
+OPENAI_API_KEY = os.getenv("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") # Bu Whisper uchun ishlatiladi
+OPENROUTER_API_KEY = os.getenv("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") # Bu miya (LLM) uchun
 
 # 1. Ovozni tanish uchun OpenAI (Whisper) klienti
 whisper_client = None
@@ -32,7 +32,7 @@ brain_client = None
 if OPENROUTER_API_KEY:
     # OpenRouter OpenAI kutubxonasi bilan ishlaydi, faqat base_url o'zgaradi
     brain_client = OpenAI(
-        api_key=OPENROUTER_API_KEY,
+        api_key=,
         base_url="https://openrouter.ai/api/v1"
     )
     logging.info("✅ OpenRouter muvaffaqiyatli ulandi.")
